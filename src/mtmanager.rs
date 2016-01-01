@@ -212,51 +212,62 @@ fn _doreq (
     
     // using hyper to do http client request
     let mut client = Client::new();
-    if method == "GET".to_owned() {
-        // calculate current timestamp;
-        let start_t = time::precise_time_s();
+    
+    // calculate current timestamp;
+    let start_t = time::precise_time_s();
+    
+    loop {
+        let per_start = time::precise_time_ns();
         
-        loop {
-            let per_start = time::precise_time_ns();
+        let mut cres;
+        if method == "GET".to_owned() {
             // fill neccessary headers
             let mut headers = Headers::new();
+            let mut query_string = String::new();
             
-            let mut cres = client.get(&url)
+            cres = client.get(&url)
                 .headers(headers)
                 .send().unwrap();
-            
-            let mut body = String::new();
-            cres.read_to_string(&mut body).unwrap();
-            // println!("ret value: {}", body);
-            
-            let per_end = time::precise_time_ns();
-            
-            assert_eq!(cres.status, hyper::Ok);
-            // make ReqResult instance
-            let req_result = ReqResult {
-                status: cres.status,
-                body_length: body.len() as i64,
-                time_last: (per_end - per_start) as f64 / 1000000.0
-            };
-            println!("{:?}", req_result);
-            bench_result.push(req_result);
-            
-            
-            let end_t = time::precise_time_s ();
-            let delta = end_t - start_t;
-            // check the time duration, if exceed, jump out
-            if delta >= time_seconds as f64 {
-                // send bench_result to main thread using channel
-                thread_tx.send(bench_result).unwrap();
-                println!("thread {} finished.", thread_i);
-                // jump out
-                break;
-            }
-        
         }
-    
-    }
-    else if method == "POST".to_owned() {
+        else {
+            // fill neccessary headers
+            let mut headers = Headers::new();
+            let mut body_string = String::new();
+            
+            cres = client.get(&url)
+                .headers(headers)
+                .body(&body_string)
+                .send().unwrap();
+        }
+        let mut cbody = String::new();
+        cres.read_to_string(&mut cbody).unwrap();
+        // println!("ret value: {}", body);
         
+        let per_end = time::precise_time_ns();
+        
+        assert_eq!(cres.status, hyper::Ok);
+        // make ReqResult instance
+        let req_result = ReqResult {
+            status: cres.status,
+            body_length: cbody.len() as i64,
+            time_last: (per_end - per_start) as f64 / 1000000.0
+        };
+        println!("{:?}", req_result);
+        bench_result.push(req_result);
+        
+        
+        let end_t = time::precise_time_s ();
+        let delta = end_t - start_t;
+        // check the time duration, if exceed, jump out
+        if delta >= time_seconds as f64 {
+            // send bench_result to main thread using channel
+            thread_tx.send(bench_result).unwrap();
+            println!("thread {} finished.", thread_i);
+            // jump out
+            break;
+        }
     }
+    
+    
+    
 }
