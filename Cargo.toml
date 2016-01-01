@@ -5,3 +5,5 @@ authors = ["Mike Tang <miketang84@outlook.com>"]
 
 [dependencies]
 hyper = "*"
+time = "*"
+prettytable-rs = "*"
