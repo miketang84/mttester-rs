@@ -11,4 +11,5 @@ This testing tool is designed for simulate logical bussiness, using the thread o
 2. add support for multiple threads per account, if server permit mutliple end login;
 3. make API easier, remove obviously .to_string(), to_owned();
 4. internal use referrence str to improve performace;
-5. 
+5. add support for cookie type token authorization;
+
