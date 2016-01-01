@@ -218,7 +218,8 @@ impl MtManagerTrait for MtManager {
         
         let total_requests = collectors.iter().fold(0, |acc, ref item| acc + item.len());
         let table = table!(
-            ["URLs", format!("{} {}", self.url.1, self.url.0)],
+            ["Auth Url", format!("{} {}", self.auth_url.1, self.auth_url.0)],
+            ["Urls", format!("{} {}", self.url.1, self.url.0)],
             ["Time Last", self.time_seconds],
             ["Users", self.threads],
             ["Total RPS", format!("{:.2}", total_requests as f64 / self.time_seconds as f64)]
