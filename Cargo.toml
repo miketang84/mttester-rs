@@ -7,3 +7,6 @@ authors = ["Mike Tang <miketang84@outlook.com>"]
 hyper = "*"
 time = "*"
 prettytable-rs = "*"
+url = "*"
+rustc-serialize = "*"
+jsonway = "*"

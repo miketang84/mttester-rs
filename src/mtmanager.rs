@@ -6,20 +6,26 @@ use std::sync::mpsc::channel;
 use std::sync::mpsc::{Sender, Receiver};
 use hyper;
 use hyper::Client;
+use hyper::client::Response;
 use hyper::status::StatusCode;
 use hyper::header::Headers;
+use hyper::header::ContentType;
 use time;
 use std::io::Read;
+use rustc_serialize::json;
+use rustc_serialize::json::Json;
+use jsonway;
+use url as url_m;
+use std::sync::Arc;
 
-
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct MtManager {
     // time to test, unit is second
     time_seconds: i64,
     // test (url, method)
-    url: (String, String),
+    url: (String, String, String),
     // login, auth (url, method)
-    auth_url: (String, String),
+    auth_url: (String, String, String),
     // how many threads to test
     threads: i64,
     // how many threads per account use to test
@@ -33,15 +39,14 @@ pub struct MtManager {
     // accounts to simulate
     // <account_name, password>
     accounts: Vec<(String, String)>,
-    
-    req_content_type: String,
+    left_values: (String, String, String),
     need_auth: bool
     
 }
 
 pub trait MtManagerTrait {
-    fn set_auth_url(&mut self, url: String, method: String) -> &mut Self;
-    fn add_url(&mut self, url: String, method: String) -> &mut Self;
+    fn set_auth_url(&mut self, url: String, method: String, req_content_type: String) -> &mut Self;
+    fn set_url(&mut self, url: String, method: String, req_content_type: String) -> &mut Self;
     fn set_seconds(&mut self, s: i64) -> &mut Self;
     fn set_threads(&mut self, n: i64) -> &mut Self;
     fn set_threads_per_account(&mut self, n: i64) -> &mut Self;
@@ -49,7 +54,8 @@ pub trait MtManagerTrait {
     fn add_header(&mut self, key: String, value: String) -> &mut Self;
     fn add_param(&mut self, key: String, value: String) -> &mut Self;
     // set the request content data type, default is www-form-urlencoded, you can set "urlencoded", or "json" now
-    fn set_param_type(&mut self, ctype: String) -> &mut Self;
+    // fn set_param_type(&mut self, ctype: String) -> &mut Self;
+    fn set_left_values(&mut self, account_key: String, pwd_key: String, left: String) -> &mut Self;
     fn output_file(&mut self, path: String) -> &mut Self;
     fn start(&mut self);
 }
@@ -65,13 +71,13 @@ impl MtManager {
 
 
 impl MtManagerTrait for MtManager {
-    fn set_auth_url(&mut self, url: String, method: String) -> &mut Self {
-        self.auth_url = (url, method);
+    fn set_auth_url(&mut self, url: String, method: String, req_content_type: String) -> &mut Self {
+        self.auth_url = (url, method, req_content_type);
         self
     }
     
-    fn add_url(&mut self, url: String, method: String) -> &mut Self {
-        self.url = (url, method);
+    fn set_url(&mut self, url: String, method: String, req_content_type: String) -> &mut Self {
+        self.url = (url, method, req_content_type);
         self
     }
     
@@ -105,11 +111,17 @@ impl MtManagerTrait for MtManager {
         self
     }
     
-    // set the request content data type, default is www-form-urlencoded, you can set "urlencoded", or "json" now
-    fn set_param_type(&mut self, ctype: String) -> &mut Self {
-        self.req_content_type = ctype;
+    // // set the request content data type, default is www-form-urlencoded, you can set "urlencoded", or "json" now
+    // fn set_param_type(&mut self, ctype: String) -> &mut Self {
+    //     self.req_content_type = ctype;
+    //     self
+    // }
+    
+    fn set_left_values(&mut self, account_key: String, pwd_key: String, left: String) -> &mut Self {
+        self.left_values = (account_key, pwd_key, left);
         self
     }
+    
     
     fn output_file(&mut self, path: String) -> &mut Self {
         // create path
@@ -134,30 +146,67 @@ impl MtManagerTrait for MtManager {
             // consider no auth first
             for i in 0..self.threads {
                 // prepare bindings and channel
-                let (url, method) = self.url.clone();
+                let (url, method, req_content_type) = self.url.clone();
                 let time_seconds = self.time_seconds;
                 let thread_tx = tx.clone();
                 
                 // create self.threads threads, do loop in every thread
                 thread::spawn ( move || {
-                    
                     _doreq(
-                            thread_tx, 
-                            method, 
-                            url, 
-                            HashMap::new(), 
-                            HashMap::new(), 
-                            time_seconds,
-                            "urlencoded".to_string(),
-                            i
+                        thread_tx, 
+                        method, 
+                        url, 
+                        HashMap::new(), 
+                        HashMap::new(), 
+                        time_seconds,
+                        req_content_type
                     );
                     
+                    println!("thread {} finished.", i);
                 });
                 
             }
         }
         else {
-            // TODO: consider need auth
+            let accounts = self.accounts.clone();
+            self.threads = accounts.len() as i64;
+            for (account, pwd) in accounts {
+                let (auth_url, auth_method, auth_req_type) = self.auth_url.clone();
+                let (url, method, req_content_type) = self.url.clone();
+                let left_values = self.left_values.clone();
+                let time_seconds = self.time_seconds;
+                let thread_tx = tx.clone();
+                
+                thread::spawn ( move || {
+                    // auth first
+                    let token = _doauth( 
+                        auth_method.clone(), 
+                        auth_url.clone(), 
+                        (account.clone(), pwd.clone()),
+                        HashMap::new(), 
+                        HashMap::new(), 
+                        auth_req_type.clone(),
+                        left_values);
+                        
+                    // here, we should do _doreq
+                    // TODO: attache headers and params, req_content_type, method to each url, if we have more than one urls
+                    let mut new_headers = HashMap::new();
+                    new_headers.insert("Authorization".to_string(), token);
+                    
+                    _doreq(
+                        thread_tx, 
+                        method, 
+                        url, 
+                        new_headers, 
+                        HashMap::new(), 
+                        time_seconds,
+                        req_content_type,
+                    );
+                    
+                    println!("thread {} finished.", account);
+                });
+            }
+            
         }
         
         
@@ -167,14 +216,7 @@ impl MtManagerTrait for MtManager {
             collectors.push(rx.recv().unwrap());
         }
         
-        // println!("Test Result: {:?}", collectors);
         let total_requests = collectors.iter().fold(0, |acc, ref item| acc + item.len());
-        
-        // =================================================
-        // println!("URLs: {} {}", self.url.1, self.url.0);
-        // println!("Time Last: {}", self.time_seconds);
-        // println!("Users: {}", self.threads);
-        // println!("Total RPS: {:.2}", total_requests as f64 / self.time_seconds as f64 );
         let table = table!(
             ["URLs", format!("{} {}", self.url.1, self.url.0)],
             ["Time Last", self.time_seconds],
@@ -199,6 +241,55 @@ struct ReqResult {
     
 }
 
+fn _do_get(client: Arc<Client>, url: String, headers: HashMap<String, String>, params: HashMap<String, String>) -> Response {
+    // fill neccessary headers
+    let mut headers_obj = Headers::new();
+    for (key, val) in headers {
+        headers_obj.set_raw(key, vec![val.as_bytes().to_vec()]);
+    }
+    let query_string = url_m::form_urlencoded::serialize(params);
+    
+    let cres = client.get(&(url + &query_string) )
+        .headers(headers_obj)
+        .send().unwrap();
+        
+    cres
+}
+
+fn _do_post(client: Arc<Client>, url: String, headers: HashMap<String, String>, params: HashMap<String, String>, req_content_type: String) -> Response {
+    // fill neccessary headers
+    let mut body_string;
+    let mut headers_obj = Headers::new();
+    // set more custom headers
+    for (key, val) in headers {
+        headers_obj.set_raw(key, vec![val.as_bytes().to_vec()]);
+    }
+    
+    if req_content_type == "json".to_owned() {
+        // set json content type headers
+        headers_obj.set(ContentType::json());
+        
+        let json_body = jsonway::object(|json| {
+            for (key, val) in params {
+                json.set(key.to_owned(), val.to_owned());
+            }
+        }).unwrap();
+        
+        body_string = json_body.to_string();
+    }
+    else {
+        // urlencoded params
+        body_string = url_m::form_urlencoded::serialize(params);
+    }
+    
+    let mut cres = client.post(&url)
+        .headers(headers_obj)
+        .body(&body_string)
+        .send().unwrap();
+        
+    cres
+}
+
 fn _doreq (
         thread_tx: Sender<Vec<ReqResult>>,
         method: String, 
@@ -206,12 +297,11 @@ fn _doreq (
         headers: HashMap<String, String>, 
         params: HashMap<String, String>, 
         time_seconds: i64,
-        req_content_type: String, 
-        thread_i: i64) {
+        req_content_type: String) {
     let mut bench_result: Vec<ReqResult> = vec![];
     
     // using hyper to do http client request
-    let mut client = Client::new();
+    let mut client = Arc::new(Client::new());
     
     // calculate current timestamp;
     let start_t = time::precise_time_s();
@@ -221,27 +311,14 @@ fn _doreq (
         
         let mut cres;
         if method == "GET".to_owned() {
-            // fill neccessary headers
-            let mut headers = Headers::new();
-            let mut query_string = String::new();
-            
-            cres = client.get(&url)
-                .headers(headers)
-                .send().unwrap();
+            cres = _do_get(client.clone(), url.clone(), headers.clone(), params.clone());
         }
         else {
-            // fill neccessary headers
-            let mut headers = Headers::new();
-            let mut body_string = String::new();
-            
-            cres = client.get(&url)
-                .headers(headers)
-                .body(&body_string)
-                .send().unwrap();
+            cres = _do_post(client.clone(), url.clone(), headers.clone(), params.clone(), req_content_type.clone());
         }
         let mut cbody = String::new();
         cres.read_to_string(&mut cbody).unwrap();
-        // println!("ret value: {}", body);
+        // println!("ret value: {}", cbody);
         
         let per_end = time::precise_time_ns();
         
@@ -262,12 +339,57 @@ fn _doreq (
         if delta >= time_seconds as f64 {
             // send bench_result to main thread using channel
             thread_tx.send(bench_result).unwrap();
-            println!("thread {} finished.", thread_i);
+            
             // jump out
             break;
         }
     }
     
-    
-    
 }
+
+///
+///
+///
+fn _doauth (
+        method: String, 
+        url: String, 
+        account: (String, String),
+        headers: HashMap<String, String>, 
+        params: HashMap<String, String>, 
+        req_content_type: String,
+        left_values: (String, String, String) ) -> String {
+    
+    // using hyper to do http client request
+    let mut client = Arc::new(Client::new());
+    
+    // calculate current timestamp;
+    let start_t = time::precise_time_ns();
+    let mut cres;
+    if method == "GET".to_owned() {
+        cres = _do_get(client.clone(), url, headers, params)
+    }
+    else {
+
+        let mut params = params;
+        params.insert(left_values.0, account.0.clone());
+        params.insert(left_values.1, account.1);
+        
+        cres = _do_post(client.clone(), url, headers, params, req_content_type);
+    }
+    let mut cbody = String::new();
+    cres.read_to_string(&mut cbody).unwrap();
+    // println!("ret is: {}", cbody);
+    
+    let end_t = time::precise_time_ns();
+    
+    let json_result = Json::from_str(&cbody[..]).unwrap();
+    
+    let token = json_result.find(&left_values.2).unwrap().as_string().unwrap();
+    
+    println!("user {} token is {}", account.0, token);
+    
+    // next, we should use this token to put to headers for next requests
+    
+    token.to_owned()
+}
+

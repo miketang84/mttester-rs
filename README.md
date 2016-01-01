@@ -7,12 +7,8 @@ This testing tool is designed for simulate logical bussiness, using the thread o
 
 ## TODO
 
-1. make headers before request;
-2. make params string before request;
-3. make json string if ctype is "json";
-4. modify headers to json type if ctype is "json";
-5. finish POST branch;
-6. finish auth login branch;
-7. get the login token;
-8. attach token to headers to make request;
-9. reform the code to make code reuse.
+1. add multiple request support, every request has its own req_content_type, headers, params, method, url;
+2. add support for multiple threads per account, if server permit mutliple end login;
+3. make API easier, remove obviously .to_string(), to_owned();
+4. internal use referrence str to improve performace;
+5. 

@@ -1,6 +1,9 @@
 extern crate hyper;
 extern crate time;
 #[macro_use]extern crate prettytable;
+extern crate url;
+extern crate rustc_serialize;
+extern crate jsonway;
 
 mod mtmanager;
 pub use mtmanager::MtManager;
@@ -13,7 +16,7 @@ fn test_basic() {
     
     let mut manager = MtManager::new();
     
-    manager.add_url("http://www.baidu.com".to_string(), "GET".to_string())
+    manager.set_url("http://www.baidu.com".to_string(), "GET".to_string(), "".to_string())
         .set_seconds(4)
         .set_threads(3)
         .start();
