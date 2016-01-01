@@ -9,9 +9,9 @@ fn main() {
     
     let mut manager = MtManager::new();
     
-    manager.add_url("http://www.artselleasy.com/ysxy/share/art.html?artId=1187".to_string(), "GET".to_string())
-        .set_seconds(30)
-        .set_threads(100)
+    manager.add_url("http://www.artselleasy.com/ysxy/api/art/1789".to_string(), "GET".to_string())
+        .set_seconds(5)
+        .set_threads(10)
         .start();
     
     println!("End.");
