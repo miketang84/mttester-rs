@@ -13,3 +13,20 @@ This testing tool is designed for simulate logical bussiness, using the thread o
 4. internal use referrence str to improve performace;
 5. add support for cookie type token authorization;
 
+## Output
+
+like 
+
+```
++-----------+--------------------------+
+| Auth Url  |                          |
++-----------+--------------------------+
+| Urls      | GET http://www.baidu.com |
++-----------+--------------------------+
+| Time Last | 4                        |
++-----------+--------------------------+
+| Users     | 3                        |
++-----------+--------------------------+
+| Total RPS | 29.50                    |
++-----------+--------------------------+
+```
