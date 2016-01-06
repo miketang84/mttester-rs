@@ -11,7 +11,7 @@ fn main() {
     
     manager.set_url("http://www.artselleasy.com/ysxy/api/art/1789".to_string(), "GET".to_string(), "urlencoded".to_string())
         .set_seconds(5)
-        .set_threads(10)
+        .set_threads(100)
         .start();
     
     println!("End.");
