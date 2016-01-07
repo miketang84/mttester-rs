@@ -18,8 +18,24 @@ use jsonway;
 use url as url_m;
 use std::sync::{Arc, Mutex};
 
+
+
+pub trait MtModifierTrait: Sized + Clone + Send + Sync {
+    fn trans(&self, index: i64) -> String;
+}
+
+#[derive(Clone, Default)]
+pub struct MtModifier;
+
+impl MtModifierTrait for MtModifier {
+    fn trans(&self, index: i64) -> String {
+        index.to_string()
+    }
+}
+
+
 #[derive(Default)]
-pub struct MtManager {
+pub struct MtManager<T: MtModifierTrait + Default + 'static> {
     // time to test, unit is second
     time_seconds: i64,
     // test (url, method)
@@ -35,9 +51,13 @@ pub struct MtManager {
     output_file: Option<String>,
     
     headers: HashMap<String, String>,
+    // ordinary params
     params: HashMap<String, String>,
-    // sample_closure:  Box<Fn()->String + 'a>,
-    closure_params: HashMap<String, Box<Fn()->String>>,
+    // thread_params used to distinct different params between each thread
+    thread_params: HashMap<String, Box<Fn()->String>>,
+    // modifier_params used to distinct different params between each request
+    modifier_params: HashMap<String, T>,
+    
     
     // accounts to simulate
     // <account_name, password>
@@ -47,7 +67,7 @@ pub struct MtManager {
     
 }
 
-pub trait MtManagerTrait {
+pub trait MtManagerTrait<T: MtModifierTrait + Default> {
     fn set_auth_url(&mut self, url: String, method: String, req_content_type: String) -> &mut Self;
     fn set_url(&mut self, url: String, method: String, req_content_type: String) -> &mut Self;
     fn set_seconds(&mut self, s: i64) -> &mut Self;
@@ -57,6 +77,7 @@ pub trait MtManagerTrait {
     fn add_header(&mut self, key: String, value: String) -> &mut Self;
     fn add_param(&mut self, key: String, value: String) -> &mut Self;
     fn add_closure_param(&mut self, key: String, value: Box<Fn() -> String>) -> &mut Self;
+    fn add_modifier_param(&mut self, key: String, value: T) -> &mut Self;
     
     // set the request content data type, default is www-form-urlencoded, you can set "urlencoded", or "json" now
     // fn set_param_type(&mut self, ctype: String) -> &mut Self;
@@ -66,17 +87,17 @@ pub trait MtManagerTrait {
 }
 
 
-impl MtManager {
+impl<T: MtModifierTrait + Default> MtManager<T> {
     
-    pub fn new() -> MtManager {
-        let mut mt: MtManager = Default::default();
-        mt.closure_params = HashMap::<String, Box<Fn()->String>>::new();
+    pub fn new() -> MtManager<T> {
+        let mut mt: MtManager<T> = Default::default();
+        mt.thread_params = HashMap::<String, Box<Fn()->String>>::new();
         mt
     }
 }
 
 
-impl MtManagerTrait for MtManager {
+impl<T: MtModifierTrait + Default> MtManagerTrait<T> for MtManager<T> {
     fn set_auth_url(&mut self, url: String, method: String, req_content_type: String) -> &mut Self {
         self.auth_url = (url, method, req_content_type);
         self
@@ -120,7 +141,12 @@ impl MtManagerTrait for MtManager {
     fn add_closure_param(&mut self, key: String, closure: Box<Fn() -> String>) -> &mut Self {
         // excute this closure and insert its return value to hashmap
         // self.params.insert(key, closure());
-        self.closure_params.insert(key, closure);
+        self.thread_params.insert(key, closure);
+        self
+    }
+    
+    fn add_modifier_param(&mut self, key: String, value: T) -> &mut Self {
+        self.modifier_params.insert(key, value);
         self
     }
     
@@ -154,6 +180,7 @@ impl MtManagerTrait for MtManager {
         };
         
         let (tx, rx) = channel();
+        let mut count = Arc::new(Mutex::new(0 as i64));
         
         if !self.need_auth {
             // consider no auth first
@@ -165,9 +192,13 @@ impl MtManagerTrait for MtManager {
                 let headers = self.headers.clone();
                 let mut params = self.params.clone();
                 
-                for (key, clo) in &self.closure_params {
+                // calc thread_params to generate extra param for each thread
+                for (key, clo) in &self.thread_params {
                     params.insert(key.clone(), clo());
                 }
+                
+                let modifier_params = self.modifier_params.clone();
+                let mut count = count.clone();
                 
                 // create self.threads threads, do loop in every thread
                 thread::spawn ( move || {
@@ -177,8 +208,10 @@ impl MtManagerTrait for MtManager {
                         url, 
                         headers, 
                         params, 
+                        modifier_params,
+                        req_content_type,
                         time_seconds,
-                        req_content_type
+                        count
                     );
                     
                     println!("thread {} finished.", i);
@@ -197,9 +230,11 @@ impl MtManagerTrait for MtManager {
                 let thread_tx = tx.clone();
                 let headers = self.headers.clone();
                 let mut params = self.params.clone();
-                for (key, clo) in &self.closure_params {
+                for (key, clo) in &self.thread_params {
                     params.insert(key.clone(), clo());
                 }
+                let modifier_params = self.modifier_params.clone();
+                let mut count = count.clone();
                 
                 thread::spawn ( move || {
                     // auth first
@@ -223,8 +258,10 @@ impl MtManagerTrait for MtManager {
                         url, 
                         headers, 
                         params, 
-                        time_seconds,
+                        modifier_params,
                         req_content_type,
+                        time_seconds,
+                        count
                     );
                     
                     println!("thread {} finished.", account);
@@ -317,14 +354,17 @@ fn _do_post(client: Arc<Client>, url: String, headers: HashMap<String, String>, 
     cres
 }
 
-fn _doreq (
+fn _doreq<T: MtModifierTrait> (
         thread_tx: Sender<Vec<ReqResult>>,
         method: String, 
         url: String, 
         headers: HashMap<String, String>, 
         params: HashMap<String, String>, 
+        modifier_params: HashMap<String, T>, 
+        req_content_type: String,
         time_seconds: i64,
-        req_content_type: String) {
+        count: Arc<Mutex<i64>>
+        ) {
     let mut bench_result: Vec<ReqResult> = vec![];
     
     // using hyper to do http client request
@@ -334,6 +374,18 @@ fn _doreq (
     let start_t = time::precise_time_s();
     
     loop {
+        // increase the counter at the begin of a request start
+        let mut count = count.lock().unwrap();
+        *count += 1;
+        println!("times: {}", *count);
+        
+        let mut params = params.clone();
+        for (key, val) in &modifier_params {
+            println!("modifier key {} ", key);
+            // execute the trans method of that modifier
+            params.insert(key.clone(), val.trans(*count));
+        }
+        
         let per_start = time::precise_time_ns();
         
         let mut cres;

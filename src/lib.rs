@@ -8,6 +8,8 @@ extern crate jsonway;
 mod mtmanager;
 pub use mtmanager::MtManager;
 pub use mtmanager::MtManagerTrait;
+pub use mtmanager::MtModifier;
+pub use mtmanager::MtModifierTrait;
 
 #[test]
 fn test_basic() {
