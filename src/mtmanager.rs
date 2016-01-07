@@ -340,6 +340,7 @@ fn _do_post(client: Arc<Client>, url: String, headers: HashMap<String, String>, 
         }).unwrap();
         
         body_string = json_body.to_string();
+        println!("{}", body_string);
     }
     else {
         // urlencoded params
@@ -374,16 +375,19 @@ fn _doreq<T: MtModifierTrait> (
     let start_t = time::precise_time_s();
     
     loop {
-        // increase the counter at the begin of a request start
-        let mut count = count.lock().unwrap();
-        *count += 1;
-        println!("times: {}", *count);
+        let mut n_count = 0;
+        {
+            // increase the counter at the begin of a request start
+            let mut count = count.lock().unwrap();
+            *count += 1;
+            println!("times: {}", *count);
+            n_count = *count;
+        }
         
         let mut params = params.clone();
         for (key, val) in &modifier_params {
-            println!("modifier key {} ", key);
             // execute the trans method of that modifier
-            params.insert(key.clone(), val.trans(*count));
+            params.insert(key.clone(), val.trans(n_count));
         }
         
         let per_start = time::precise_time_ns();
@@ -401,14 +405,15 @@ fn _doreq<T: MtModifierTrait> (
         
         let per_end = time::precise_time_ns();
         
-        assert_eq!(cres.status, hyper::Ok);
+        // assert_eq!(cres.status, hyper::Ok);
         // make ReqResult instance
         let req_result = ReqResult {
             status: cres.status,
             body_length: cbody.len() as i64,
             time_last: (per_end - per_start) as f64 / 1000000.0
         };
-        println!("{:?}", req_result);
+        println!("h->{:?}", headers.clone());
+        println!("r->{:?}", req_result);
         bench_result.push(req_result);
         
         
