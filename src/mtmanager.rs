@@ -21,16 +21,20 @@ use std::sync::{Arc, Mutex};
 
 
 pub trait MtModifierTrait: Sized + Clone + Send + Sync {
-    fn trans(&self, index: i64) -> String;
+    fn before(&self, index: i64) -> String;
+    fn after(&self, index: i64, res: &String) -> String {
+        "".to_string()
+    }
 }
 
 #[derive(Clone, Default)]
 pub struct MtModifier;
 
 impl MtModifierTrait for MtModifier {
-    fn trans(&self, index: i64) -> String {
+    fn before(&self, index: i64) -> String {
         index.to_string()
     }
+    
 }
 
 
@@ -302,7 +306,8 @@ struct ReqResult {
     body_length: i64,
     // req->res duration, m seconds
     time_last: f64,
-    
+    // a string after processing
+    restext: String
 }
 
 fn _do_get(client: Arc<Client>, url: String, headers: HashMap<String, String>, params: HashMap<String, String>) -> Response {
@@ -312,7 +317,7 @@ fn _do_get(client: Arc<Client>, url: String, headers: HashMap<String, String>, p
         headers_obj.set_raw(key, vec![val.as_bytes().to_vec()]);
     }
     let query_string = url_m::form_urlencoded::serialize(params);
-    println!("query_string is: {}", query_string);
+    // println!("query_string is: {}", query_string);
     let cres = client.get(&(url + "?" + &query_string) )
         .headers(headers_obj)
         .send().unwrap();
@@ -387,7 +392,7 @@ fn _doreq<T: MtModifierTrait> (
         let mut params = params.clone();
         for (key, val) in &modifier_params {
             // execute the trans method of that modifier
-            params.insert(key.clone(), val.trans(n_count));
+            params.insert(key.clone(), val.before(n_count));
         }
         
         let per_start = time::precise_time_ns();
@@ -404,16 +409,25 @@ fn _doreq<T: MtModifierTrait> (
         // println!("ret value: {}", cbody);
         
         let per_end = time::precise_time_ns();
+
+        let nbody = cbody.len();
+        
+        let mut restext = String::new();
+        for (_, val) in &modifier_params {
+            // execute the trans method of that modifier, and collect the postprocess result
+            restext.push_str(&val.after(n_count, &cbody));
+        }
         
         // assert_eq!(cres.status, hyper::Ok);
         // make ReqResult instance
         let req_result = ReqResult {
             status: cres.status,
-            body_length: cbody.len() as i64,
-            time_last: (per_end - per_start) as f64 / 1000000.0
+            body_length: nbody as i64,
+            time_last: (per_end - per_start) as f64 / 1000000.0,
+            restext: restext
         };
-        println!("h->{:?}", headers.clone());
-        println!("r->{:?}", req_result);
+        // println!("h->{:?}", headers.clone());
+        // println!("r->{:?}", req_result);
         bench_result.push(req_result);
         
         

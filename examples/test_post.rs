@@ -13,7 +13,7 @@ use std::thread;
 struct Custom;
 
 impl MtModifierTrait for Custom {
-    fn trans(&self, index: i64) -> String {
+    fn before(&self, index: i64) -> String {
         thread::sleep_ms(0);
         (2300+index).to_string()
     }
